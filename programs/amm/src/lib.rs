@@ -1,9 +1,8 @@
 use anchor_lang::prelude::*;
 use anchor_spl::{
-    token::{Token, Mint, TokenAccount, Transfer, transfer, MintTo, mint_to, Burn, burn},
+    token::{Token, TokenAccount, Mint, Transfer, transfer, MintTo, mint_to, Burn, burn},
     associated_token::AssociatedToken,
 };
-use std::mem::size_of;
 
 declare_id!("6wypgzPHKssHj8tVrofH8FzDq9fib2QLWsAkMnDFsSCv");
 
@@ -11,10 +10,9 @@ declare_id!("6wypgzPHKssHj8tVrofH8FzDq9fib2QLWsAkMnDFsSCv");
 pub mod amm {
     use super::*;
 
-    // Initialize AMM pool
     pub fn initialize_pool(
         ctx: Context<InitializePool>,
-        pool_fee_bps: u16,
+        fee_bps: u16,
     ) -> Result<()> {
         let pool = &mut ctx.accounts.pool;
         pool.token_a_mint = ctx.accounts.token_a_mint.key();
@@ -22,39 +20,41 @@ pub mod amm {
         pool.token_a_vault = ctx.accounts.token_a_vault.key();
         pool.token_b_vault = ctx.accounts.token_b_vault.key();
         pool.lp_mint = ctx.accounts.lp_mint.key();
-        pool.fee_bps = pool_fee_bps;
+        pool.fee_bps = fee_bps;
         pool.admin = ctx.accounts.admin.key();
         pool.bump = ctx.bumps.pool;
         Ok(())
     }
 
-    // Add liquidity to the pool
     pub fn add_liquidity(
         ctx: Context<AddLiquidity>,
         amount_a: u64,
         amount_b: u64,
     ) -> Result<()> {
-        let pool = &ctx.accounts.pool;
-        
-        // Transfer token A from user to vault
-        let cpi_accounts_a = Transfer {
+        // Transfer token A
+        let transfer_a_accounts = Transfer {
             from: ctx.accounts.user_token_a_account.to_account_info(),
             to: ctx.accounts.token_a_vault.to_account_info(),
             authority: ctx.accounts.user.to_account_info(),
         };
         
-        let cpi_program = ctx.accounts.token_program.to_account_info();
-        let cpi_ctx_a = CpiContext::new(cpi_program.clone(), cpi_accounts_a);
+        let cpi_ctx_a = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            transfer_a_accounts,
+        );
         transfer(cpi_ctx_a, amount_a)?;
         
-        // Transfer token B from user to vault
-        let cpi_accounts_b = Transfer {
+        // Transfer token B
+        let transfer_b_accounts = Transfer {
             from: ctx.accounts.user_token_b_account.to_account_info(),
             to: ctx.accounts.token_b_vault.to_account_info(),
             authority: ctx.accounts.user.to_account_info(),
         };
         
-        let cpi_ctx_b = CpiContext::new(cpi_program.clone(), cpi_accounts_b);
+        let cpi_ctx_b = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(),
+            transfer_b_accounts,
+        );
         transfer(cpi_ctx_b, amount_b)?;
         
         // Calculate LP tokens to mint
@@ -63,22 +63,23 @@ pub mod amm {
             let product = amount_a.checked_mul(amount_b).unwrap();
             (product as f64).sqrt() as u64
         } else {
-            // Calculate proportional LP tokens based on token A contribution
-            let total_lp_supply = ctx.accounts.lp_mint.supply;
-            let pool_a_balance = ctx.accounts.token_a_vault.amount.checked_sub(amount_a).unwrap();
+            // Calculate based on share of pool
+            let total_lp = ctx.accounts.lp_mint.supply;
+            let pool_a_before = ctx.accounts.token_a_vault.amount - amount_a;
+            
             amount_a
-                .checked_mul(total_lp_supply)
+                .checked_mul(total_lp)
                 .unwrap()
-                .checked_div(pool_a_balance)
+                .checked_div(pool_a_before)
                 .unwrap()
         };
         
-        // Mint LP tokens to user
+        // Mint LP tokens
         let seeds = &[
             b"pool",
-            pool.token_a_mint.as_ref(),
-            pool.token_b_mint.as_ref(),
-            &[pool.bump],
+            ctx.accounts.pool.token_a_mint.as_ref(),
+            ctx.accounts.pool.token_b_mint.as_ref(),
+            &[ctx.accounts.pool.bump],
         ];
         let signer = &[&seeds[..]];
         
@@ -98,15 +99,14 @@ pub mod amm {
         Ok(())
     }
 
-    // Swap tokens
     pub fn swap(
         ctx: Context<Swap>,
         amount_in: u64,
-        minimum_amount_out: u64,
+        min_amount_out: u64,
     ) -> Result<()> {
         let pool = &ctx.accounts.pool;
         
-        // Determine swap direction
+        // Determine direction
         let is_a_to_b = ctx.accounts.input_mint.key() == pool.token_a_mint;
         
         let (input_reserves, output_reserves) = if is_a_to_b {
@@ -115,40 +115,37 @@ pub mod amm {
             (ctx.accounts.token_b_vault.amount, ctx.accounts.token_a_vault.amount)
         };
         
-        // Calculate output amount using constant product formula (x * y = k)
-        let amount_in_with_fee = amount_in
-            .checked_mul(10000u64.saturating_sub(pool.fee_bps as u64))
+        // Calculate output with fee
+        let fee_amount = amount_in
+            .checked_mul(pool.fee_bps as u64)
             .unwrap()
-            .checked_div(10000u64)
+            .checked_div(10000)
             .unwrap();
         
-        let numerator = amount_in_with_fee
+        let amount_in_after_fee = amount_in.checked_sub(fee_amount).unwrap();
+        
+        let numerator = amount_in_after_fee
             .checked_mul(output_reserves)
             .unwrap();
         let denominator = input_reserves
-            .checked_add(amount_in_with_fee)
+            .checked_add(amount_in_after_fee)
             .unwrap();
         
-        let amount_out = numerator
-            .checked_div(denominator)
-            .unwrap();
+        let amount_out = numerator.checked_div(denominator).unwrap();
         
-        // Check slippage
         require!(
-            amount_out >= minimum_amount_out,
+            amount_out >= min_amount_out,
             AmmError::SlippageExceeded
         );
         
-        // Transfer input tokens from user to vault
-        let input_vault = if is_a_to_b {
-            ctx.accounts.token_a_vault.to_account_info()
-        } else {
-            ctx.accounts.token_b_vault.to_account_info()
-        };
-        
+        // Transfer input
         let transfer_in_accounts = Transfer {
             from: ctx.accounts.user_input_account.to_account_info(),
-            to: input_vault,
+            to: if is_a_to_b {
+                ctx.accounts.token_a_vault.to_account_info()
+            } else {
+                ctx.accounts.token_b_vault.to_account_info()
+            },
             authority: ctx.accounts.user.to_account_info(),
         };
         
@@ -167,14 +164,12 @@ pub mod amm {
         ];
         let signer = &[&seeds[..]];
         
-        let output_vault = if is_a_to_b {
-            ctx.accounts.token_b_vault.to_account_info()
-        } else {
-            ctx.accounts.token_a_vault.to_account_info()
-        };
-        
         let transfer_out_accounts = Transfer {
-            from: output_vault,
+            from: if is_a_to_b {
+                ctx.accounts.token_b_vault.to_account_info()
+            } else {
+                ctx.accounts.token_a_vault.to_account_info()
+            },
             to: ctx.accounts.user_output_account.to_account_info(),
             authority: ctx.accounts.pool.to_account_info(),
         };
@@ -189,30 +184,25 @@ pub mod amm {
         Ok(())
     }
 
-    // Remove liquidity
     pub fn remove_liquidity(
         ctx: Context<RemoveLiquidity>,
         lp_amount: u64,
     ) -> Result<()> {
         let pool = &ctx.accounts.pool;
         
-        // Calculate proportional share
-        let total_lp_supply = ctx.accounts.lp_mint.supply;
-        require!(total_lp_supply > 0, AmmError::InsufficientLiquidity);
-        
-        let share_numerator = lp_amount as u128;
-        let share_denominator = total_lp_supply as u128;
+        // Calculate proportional amounts
+        let total_lp = ctx.accounts.lp_mint.supply;
         
         let amount_a_out = (ctx.accounts.token_a_vault.amount as u128)
-            .checked_mul(share_numerator)
+            .checked_mul(lp_amount as u128)
             .unwrap()
-            .checked_div(share_denominator)
+            .checked_div(total_lp as u128)
             .unwrap() as u64;
         
         let amount_b_out = (ctx.accounts.token_b_vault.amount as u128)
-            .checked_mul(share_numerator)
+            .checked_mul(lp_amount as u128)
             .unwrap()
-            .checked_div(share_denominator)
+            .checked_div(total_lp as u128)
             .unwrap() as u64;
         
         // Burn LP tokens
@@ -274,7 +264,7 @@ pub struct InitializePool<'info> {
     #[account(
         init,
         payer = admin,
-        space = 8 + Pool::LEN,
+        space = 8 + std::mem::size_of::<Pool>(),
         seeds = [b"pool", token_a_mint.key().as_ref(), token_b_mint.key().as_ref()],
         bump
     )]
@@ -321,42 +311,39 @@ pub struct AddLiquidity<'info> {
         mut,
         seeds = [b"pool", pool.token_a_mint.as_ref(), pool.token_b_mint.as_ref()],
         bump = pool.bump,
+        has_one = token_a_mint,
+        has_one = token_b_mint,
+        has_one = token_a_vault,
+        has_one = token_b_vault,
+        has_one = lp_mint,
     )]
     pub pool: Account<'info, Pool>,
     
-    #[account(
-        mut,
-        token::mint = pool.token_a_mint,
-        token::authority = pool,
-    )]
+    #[account(mut)]
     pub token_a_vault: Account<'info, TokenAccount>,
     
-    #[account(
-        mut,
-        token::mint = pool.token_b_mint,
-        token::authority = pool,
-    )]
+    #[account(mut)]
     pub token_b_vault: Account<'info, TokenAccount>,
     
-    #[account(
-        mut,
-        mint::authority = pool,
-    )]
+    #[account(mut)]
     pub lp_mint: Account<'info, Mint>,
+    
+    pub token_a_mint: Account<'info, Mint>,
+    pub token_b_mint: Account<'info, Mint>,
     
     #[account(mut)]
     pub user: Signer<'info>,
     
     #[account(
         mut,
-        token::mint = pool.token_a_mint,
+        token::mint = token_a_mint,
         token::authority = user,
     )]
     pub user_token_a_account: Account<'info, TokenAccount>,
     
     #[account(
         mut,
-        token::mint = pool.token_b_mint,
+        token::mint = token_b_mint,
         token::authority = user,
     )]
     pub user_token_b_account: Account<'info, TokenAccount>,
@@ -380,21 +367,15 @@ pub struct Swap<'info> {
         mut,
         seeds = [b"pool", pool.token_a_mint.as_ref(), pool.token_b_mint.as_ref()],
         bump = pool.bump,
+        has_one = token_a_vault,
+        has_one = token_b_vault,
     )]
     pub pool: Account<'info, Pool>,
     
-    #[account(
-        mut,
-        token::mint = pool.token_a_mint,
-        token::authority = pool,
-    )]
+    #[account(mut)]
     pub token_a_vault: Account<'info, TokenAccount>,
     
-    #[account(
-        mut,
-        token::mint = pool.token_b_mint,
-        token::authority = pool,
-    )]
+    #[account(mut)]
     pub token_b_vault: Account<'info, TokenAccount>,
     
     #[account(mut)]
@@ -405,15 +386,13 @@ pub struct Swap<'info> {
     
     #[account(
         mut,
-        token::mint = input_mint,
-        token::authority = user,
+        constraint = user_input_account.mint == input_mint.key(),
     )]
     pub user_input_account: Account<'info, TokenAccount>,
     
     #[account(
         mut,
-        token::mint = output_mint,
-        token::authority = user,
+        constraint = user_output_account.mint == output_mint.key(),
     )]
     pub user_output_account: Account<'info, TokenAccount>,
     
@@ -426,27 +405,19 @@ pub struct RemoveLiquidity<'info> {
         mut,
         seeds = [b"pool", pool.token_a_mint.as_ref(), pool.token_b_mint.as_ref()],
         bump = pool.bump,
+        has_one = token_a_vault,
+        has_one = token_b_vault,
+        has_one = lp_mint,
     )]
     pub pool: Account<'info, Pool>,
     
-    #[account(
-        mut,
-        token::mint = pool.token_a_mint,
-        token::authority = pool,
-    )]
+    #[account(mut)]
     pub token_a_vault: Account<'info, TokenAccount>,
     
-    #[account(
-        mut,
-        token::mint = pool.token_b_mint,
-        token::authority = pool,
-    )]
+    #[account(mut)]
     pub token_b_vault: Account<'info, TokenAccount>,
     
-    #[account(
-        mut,
-        mint::authority = pool,
-    )]
+    #[account(mut)]
     pub lp_mint: Account<'info, Mint>,
     
     #[account(mut)]
@@ -454,22 +425,19 @@ pub struct RemoveLiquidity<'info> {
     
     #[account(
         mut,
-        token::mint = lp_mint,
-        token::authority = user,
+        constraint = user_lp_account.mint == lp_mint.key(),
     )]
     pub user_lp_account: Account<'info, TokenAccount>,
     
     #[account(
         mut,
-        token::mint = pool.token_a_mint,
-        token::authority = user,
+        constraint = user_token_a_account.mint == pool.token_a_mint,
     )]
     pub user_token_a_account: Account<'info, TokenAccount>,
     
     #[account(
         mut,
-        token::mint = pool.token_b_mint,
-        token::authority = user,
+        constraint = user_token_b_account.mint == pool.token_b_mint,
     )]
     pub user_token_b_account: Account<'info, TokenAccount>,
     
@@ -477,6 +445,7 @@ pub struct RemoveLiquidity<'info> {
 }
 
 #[account]
+#[derive(Default)]
 pub struct Pool {
     pub token_a_mint: Pubkey,
     pub token_b_mint: Pubkey,
@@ -486,10 +455,6 @@ pub struct Pool {
     pub fee_bps: u16,
     pub admin: Pubkey,
     pub bump: u8,
-}
-
-impl Pool {
-    pub const LEN: usize = 32 * 4 + 2 + 32 + 1; // 4 Pubkeys + u16 + Pubkey + u8
 }
 
 #[error_code]
