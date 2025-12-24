@@ -13,10 +13,10 @@ import {
   getOrCreateAssociatedTokenAccount,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
-import {
-  Keypair,
-  Transaction
-} from '@solana/web3.js';
+// import {
+//   Keypair,
+//   Transaction
+// } from '@solana/web3.js';
 import { assert } from 'chai';
 
 describe('amm', () => {
@@ -31,8 +31,10 @@ describe('amm', () => {
   let tokenBMint: anchor.web3.PublicKey;
   let pool: anchor.web3.PublicKey;
   let poolBump: number;
-  let lpMint: anchor.web3.PublicKey;
-  
+  let lpMint: anchor.web3.Keypair;
+  let tokenAVault: anchor.web3.Keypair;
+  let tokenBVault: anchor.web3.Keypair;
+
   before(async () => {
     // Create test tokens
     tokenAMint = await createMint(
@@ -70,48 +72,15 @@ describe('amm', () => {
     console.log(anchor.web3.SystemProgram.programId);
 
 
-    const lpMintKP = anchor.web3.Keypair.generate();
-    lpMint = await createMint(
-      provider.connection,
-      admin.payer,
-      pool, // authority is the pool
-      pool, // freeze authority is also the pool
-      // admin.publicKey,
-      // admin.publicKey,
-      9,
-      lpMintKP
-    );
-    console.log("LP Mint:", lpMint.toBase58());
+    lpMint = anchor.web3.Keypair.generate();
+    console.log("LP Mint:", lpMint.publicKey.toBase58());
     
     // Create vault accounts manually
-    // tokenAVault = await createAccount(
-    // const tokenAVault = await getOrCreateAssociatedTokenAccount(
-    const AKP = anchor.web3.Keypair.generate();
-    const tokenAVault = getAssociatedTokenAddressSync(
-      // provider.connection,
-      // admin.payer,
-      tokenAMint,
-      // tokenBMint,
-      pool, // owner is the pool
-      // admin.publicKey // owner is the pool
-      true
-    );
-    console.log("Token A Vault:", tokenAVault.toBase58());
-    // console.log("Token A Vault", tokenAVault.address.toBase58())
+    tokenAVault = anchor.web3.Keypair.generate();
+    console.log("Token A Vault:", tokenAVault.publicKey.toBase58());
     
-    const BKP = anchor.web3.Keypair.generate();
-    // tokenBVault = await createAccount(
-    const tokenBVault = await getOrCreateAssociatedTokenAccount(
-    // const tokenBVault = getAssociatedTokenAddressSync(
-      provider.connection,
-      admin.payer,
-      tokenBMint,
-      pool, // owner is the pool
-      // admin.publicKey // owner is the pool
-      true
-    );
-    console.log("Token B Vault: ", tokenBVault.address.toBase58());
-    // console.log("Token B Vault: ", tokenBVault.toBase58());
+    tokenBVault = anchor.web3.Keypair.generate();
+    console.log("Token B Vault: ", tokenBVault.publicKey.toBase58());
     console.log("Token A Mint: ", tokenAMint.toBase58());
     console.log("Token B Mint: ", tokenBMint.toBase58());
     console.log("Pool: ", pool.toBase58());
@@ -132,158 +101,151 @@ describe('amm', () => {
     // );
 
     // Initialize pool with ALL required accounts
-    const test_admin = anchor.web3.Keypair.generate();
-    console.log('test admin ', test_admin.publicKey.toBase58());
+    // const test_admin = anchor.web3.Keypair.generate();
+    // console.log('test admin ', test_admin.publicKey.toBase58());
     const tx = await program.methods
       .initializePool(30) // 0.3% fee
       .accounts({
         pool: pool,
         tokenAMint: tokenAMint,
         tokenBMint: tokenBMint,
-        // tokenAVault: tokenAVault.address,
-        // tokenBVault: tokenBVault.address,
-        // tokenAVault: tokenAVault,
-        // tokenBVault: tokenBVault,
-        tokenAVault: AKP.publicKey,
-        tokenBVault: BKP.publicKey,
-        lpMint: lpMintKP.publicKey,
+        tokenAVault: tokenAVault.publicKey,
+        tokenBVault: tokenBVault.publicKey,
+        lpMint: lpMint.publicKey,
         admin: admin.publicKey,
-        // admin: test_admin.publicKey,
         tokenProgram: TOKEN_PROGRAM_ID,
         systemProgram: anchor.web3.SystemProgram.programId,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       })
       // .signers([admin.payer])
-      // .signers([tokenAVault, tokenBVault, lpMint]) // Must sign because they are being initialized
-      .signers([AKP, BKP, lpMintKP])
+      .signers([tokenAVault, tokenBVault, lpMint])
       .rpc();
     
     console.log("Initialize pool transaction:", tx);
     
-    // Fetch pool account
     const poolAccount = await program.account.pool.fetch(pool);
     assert.equal(poolAccount.tokenAMint.toBase58(), tokenAMint.toBase58());
     assert.equal(poolAccount.tokenBMint.toBase58(), tokenBMint.toBase58());
     assert.equal(poolAccount.feeBps, 30);
-    assert.equal(poolAccount.lpMint.toBase58(), lpMintKP.publicKey.toBase58());
-    assert.equal(poolAccount.tokenAVault.toBase58(), AKP.publicKey.toBase58());
-    assert.equal(poolAccount.tokenBVault.toBase58(), BKP.publicKey.toBase58());
+    assert.equal(poolAccount.lpMint.toBase58(), lpMint.publicKey.toBase58());
+    assert.equal(poolAccount.tokenAVault.toBase58(), tokenAVault.publicKey.toBase58());
+    assert.equal(poolAccount.tokenBVault.toBase58(), tokenBVault.publicKey.toBase58());
     
     console.log("Pool initialized successfully");
   });
 
-  // Rest of your tests remain the same...
-  // it('Add Liquidity', async () => {
-  //   // Create user token accounts
-  //   const userTokenAAccount = await getAssociatedTokenAddress(
-  //     tokenAMint,
-  //     admin.publicKey
-  //   );
+  it('Add Liquidity', async () => {
+    // Create user token accounts
+    const userTokenAAccount = await getAssociatedTokenAddress(
+      tokenAMint,
+      admin.publicKey
+    );
     
-  //   const userTokenBAccount = await getAssociatedTokenAddress(
-  //     tokenBMint,
-  //     admin.publicKey
-  //   );
+    const userTokenBAccount = await getAssociatedTokenAddress(
+      tokenBMint,
+      admin.publicKey
+    );
     
-  //   // Check if user token accounts exist, create if not
-  //   try {
-  //     await getAccount(provider.connection, userTokenAAccount);
-  //   } catch {
-  //     await createAssociatedTokenAccount(
-  //       provider.connection,
-  //       admin.payer,
-  //       tokenAMint,
-  //       admin.publicKey
-  //     );
-  //   }
+    // Check if user token accounts exist, create if not
+    try {
+      await getAccount(provider.connection, userTokenAAccount);
+    } catch {
+      await createAssociatedTokenAccount(
+        provider.connection,
+        admin.payer,
+        tokenAMint,
+        admin.publicKey
+      );
+    }
     
-  //   try {
-  //     await getAccount(provider.connection, userTokenBAccount);
-  //   } catch {
-  //     await createAssociatedTokenAccount(
-  //       provider.connection,
-  //       admin.payer,
-  //       tokenBMint,
-  //       admin.publicKey
-  //     );
-  //   }
+    try {
+      await getAccount(provider.connection, userTokenBAccount);
+    } catch {
+      await createAssociatedTokenAccount(
+        provider.connection,
+        admin.payer,
+        tokenBMint,
+        admin.publicKey
+      );
+    }
     
-  //   // Mint test tokens to user
-  //   await mintTo(
-  //     provider.connection,
-  //     admin.payer,
-  //     tokenAMint,
-  //     userTokenAAccount,
-  //     admin.publicKey,
-  //     1000 * 10 ** 6 // 1000 tokens
-  //   );
+    // Mint test tokens to user
+    await mintTo(
+      provider.connection,
+      admin.payer,
+      tokenAMint,
+      userTokenAAccount,
+      admin.publicKey,
+      1000 * 10 ** 6 // 1000 tokens
+    );
     
-  //   await mintTo(
-  //     provider.connection,
-  //     admin.payer,
-  //     tokenBMint,
-  //     userTokenBAccount,
-  //     admin.publicKey,
-  //     1000 * 10 ** 6 // 1000 tokens
-  //   );
+    await mintTo(
+      provider.connection,
+      admin.payer,
+      tokenBMint,
+      userTokenBAccount,
+      admin.publicKey,
+      1000 * 10 ** 6 // 1000 tokens
+    );
     
-  //   // Create user LP account
-  //   const userLpAccount = await getAssociatedTokenAddress(
-  //     lpMint,
-  //     admin.publicKey
-  //   );
+    // Create user LP account
+    const userLpAccount = await getAssociatedTokenAddress(
+      lpMint.publicKey,
+      admin.publicKey
+    );
     
-  //   // Check if user LP account exists, create if not
-  //   try {
-  //     await getAccount(provider.connection, userLpAccount);
-  //   } catch {
-  //     await createAssociatedTokenAccount(
-  //       provider.connection,
-  //       admin.payer,
-  //       lpMint,
-  //       admin.publicKey
-  //     );
-  //   }
+    // Check if user LP account exists, create if not
+    try {
+      await getAccount(provider.connection, userLpAccount);
+    } catch {
+      await createAssociatedTokenAccount(
+        provider.connection,
+        admin.payer,
+        lpMint.publicKey,
+        admin.publicKey
+      );
+    }
     
-  //   // Add liquidity with all required accounts
-  //   const tx = await program.methods
-  //     .addLiquidity(
-  //       new anchor.BN(100 * 10 ** 6), // 100 token A
-  //       new anchor.BN(100 * 10 ** 6)  // 100 token B
-  //     )
-  //     .accounts({
-  //       pool: pool,
-  //       tokenAVault: tokenAVault,
-  //       tokenBVault: tokenBVault,
-  //       lpMint: lpMint,
-  //       tokenAMint: tokenAMint,
-  //       tokenBMint: tokenBMint,
-  //       user: admin.publicKey,
-  //       userTokenAAccount: userTokenAAccount,
-  //       userTokenBAccount: userTokenBAccount,
-  //       userLpAccount: userLpAccount,
-  //       tokenProgram: TOKEN_PROGRAM_ID,
-  //       systemProgram: anchor.web3.SystemProgram.programId,
-  //       rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-  //     })
-  //     .signers([admin.payer])
-  //     .rpc();
+    // Add liquidity with all required accounts
+    const tx = await program.methods
+      .addLiquidity(
+        new anchor.BN(100 * 10 ** 6), // 100 token A
+        new anchor.BN(100 * 10 ** 6)  // 100 token B
+      )
+      .accounts({
+        pool: pool,
+        tokenAVault: tokenAVault.publicKey,
+        tokenBVault: tokenBVault.publicKey,
+        lpMint: lpMint.publicKey,
+        tokenAMint: tokenAMint,
+        tokenBMint: tokenBMint,
+        user: admin.publicKey,
+        userTokenAAccount: userTokenAAccount,
+        userTokenBAccount: userTokenBAccount,
+        userLpAccount: userLpAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      })
+      // .signers([admin.payer])
+      // .signers([lpMint, tokenAVault, tokenBVault])
+      .signers([])
+      .rpc();
     
-  //   console.log("Add liquidity transaction:", tx);
+    console.log("Add liquidity transaction:", tx);
     
-  //   // Check balances
-  //   const vaultABalance = await getAccount(provider.connection, tokenAVault);
-  //   const vaultBBalance = await getAccount(provider.connection, tokenBVault);
-  //   const userLpBalance = await getAccount(provider.connection, userLpAccount);
+    // Check balances
+    const vaultABalance = await getAccount(provider.connection, tokenAVault.publicKey);
+    const vaultBBalance = await getAccount(provider.connection, tokenBVault.publicKey);
+    const userLpBalance = await getAccount(provider.connection, userLpAccount);
+    console.log("Vault A Balance:", vaultABalance.amount.toString());
+    console.log("Vault B Balance:", vaultBBalance.amount.toString());
+    console.log("User LP Balance:", userLpBalance.amount.toString());
     
-  //   console.log("Vault A Balance:", vaultABalance.amount.toString());
-  //   console.log("Vault B Balance:", vaultBBalance.amount.toString());
-  //   console.log("User LP Balance:", userLpBalance.amount.toString());
-    
-  //   assert.equal(vaultABalance.amount.toString(), (100 * 10 ** 6).toString());
-  //   assert.equal(vaultBBalance.amount.toString(), (100 * 10 ** 6).toString());
-  //   assert(userLpBalance.amount.gt(new anchor.BN(0)));
-  // });
+    assert.equal(vaultABalance.amount.toString(), (100 * 10 ** 6).toString());
+    assert.equal(vaultBBalance.amount.toString(), (100 * 10 ** 6).toString());
+    assert(new anchor.BN(0).lt(new anchor.BN(userLpBalance.amount)));
+  });
 
   // it('Swap Tokens', async () => {
   //   const userTokenAAccount = await getAssociatedTokenAddress(

@@ -351,10 +351,11 @@ pub struct AddLiquidity<'info> {
     pub user_token_b_account: Account<'info, TokenAccount>,
     
     #[account(
-        init_if_needed,
-        payer = user,
-        token::mint = lp_mint,
-        token::authority = user,
+        mut,
+        // init_if_needed,
+        // payer = user,
+        associated_token::mint = lp_mint,
+        associated_token::authority = user,
     )]
     pub user_lp_account: Account<'info, TokenAccount>,
     
