@@ -1,9 +1,9 @@
 import * as anchor from '@coral-xyz/anchor';
 import { Program } from '@coral-xyz/anchor';
 import { Amm } from '../target/types/amm';
-import { 
-  TOKEN_PROGRAM_ID, 
-  createMint, 
+import {
+  TOKEN_PROGRAM_ID,
+  createMint,
   getAssociatedTokenAddress,
   createAssociatedTokenAccount,
   mintTo,
@@ -23,10 +23,10 @@ describe('amm', () => {
   const provider = anchor.AnchorProvider.env();
   const connection = provider.connection;
   anchor.setProvider(provider);
-  
+
   const program = anchor.workspace.Amm as Program<Amm>;
   const admin = provider.wallet;
-  
+
   let tokenAMint: anchor.web3.PublicKey;
   let tokenBMint: anchor.web3.PublicKey;
   let pool: anchor.web3.PublicKey;
@@ -44,7 +44,7 @@ describe('amm', () => {
       null,
       9
     );
-    
+
     tokenBMint = await createMint(
       provider.connection,
       admin.payer,
@@ -52,7 +52,7 @@ describe('amm', () => {
       null,
       6
     );
-    
+
     // Find pool PDA
     [pool, poolBump] = anchor.web3.PublicKey.findProgramAddressSync(
       [
@@ -74,11 +74,11 @@ describe('amm', () => {
 
     lpMint = anchor.web3.Keypair.generate();
     console.log("LP Mint:", lpMint.publicKey.toBase58());
-    
+
     // Create vault accounts manually
     tokenAVault = anchor.web3.Keypair.generate();
     console.log("Token A Vault:", tokenAVault.publicKey.toBase58());
-    
+
     tokenBVault = anchor.web3.Keypair.generate();
     console.log("Token B Vault: ", tokenBVault.publicKey.toBase58());
     console.log("Token A Mint: ", tokenAMint.toBase58());
@@ -89,11 +89,11 @@ describe('amm', () => {
     console.log("tokenProgram: ", TOKEN_PROGRAM_ID.toBase58());
     console.log("systemProgram: ", anchor.web3.SystemProgram.programId.toBase58());
     console.log("rent: ", anchor.web3.SYSVAR_RENT_PUBKEY.toBase58());
-    
+
     // const transaction = new Transaction();
     // // .add(transferInstruction);
     // transaction.add()
- 
+
     // const transactionSignature = await sendAndConfirmTransaction(
     //   connection,
     //   transaction,
@@ -120,9 +120,9 @@ describe('amm', () => {
       // .signers([admin.payer])
       .signers([tokenAVault, tokenBVault, lpMint, admin.payer])
       .rpc();
-    
+
     console.log("Initialize pool transaction:", tx);
-    
+
     const poolAccount = await program.account.pool.fetch(pool);
     assert.equal(poolAccount.tokenAMint.toBase58(), tokenAMint.toBase58());
     assert.equal(poolAccount.tokenBMint.toBase58(), tokenBMint.toBase58());
@@ -130,45 +130,47 @@ describe('amm', () => {
     assert.equal(poolAccount.lpMint.toBase58(), lpMint.publicKey.toBase58());
     assert.equal(poolAccount.tokenAVault.toBase58(), tokenAVault.publicKey.toBase58());
     assert.equal(poolAccount.tokenBVault.toBase58(), tokenBVault.publicKey.toBase58());
-    
+
     console.log("Pool initialized successfully");
   });
 
   it('Add Liquidity', async () => {
     // Create user token accounts
-    const userTokenAAccount = await getAssociatedTokenAddress(
+
+    // Check if user token accounts exist, create if not
+    const getOrCreateATA = async (
+      payer: anchor.web3.Signer, 
+      mint: anchor.web3.PublicKey, 
+      owner: anchor.web3.PublicKey
+    ): Promise<anchor.web3.PublicKey> => {
+      const ata = await getAssociatedTokenAddress(mint, owner);
+      try {
+        await getAccount(provider.connection, ata);
+        console.log("got ATA: ", ata.toBase58());
+      } catch {
+        await createAssociatedTokenAccount(
+          provider.connection,
+          payer,
+          mint,
+          owner
+        );
+        console.log("created ATA: ", ata.toBase58());
+      }
+      return ata;
+    }
+
+    const userTokenAAccount = await getOrCreateATA(
+      admin.payer,
       tokenAMint,
       admin.publicKey
     );
-    
-    const userTokenBAccount = await getAssociatedTokenAddress(
+
+    const userTokenBAccount = await getOrCreateATA(
+      admin.payer,
       tokenBMint,
       admin.publicKey
     );
-    
-    // Check if user token accounts exist, create if not
-    try {
-      await getAccount(provider.connection, userTokenAAccount);
-    } catch {
-      await createAssociatedTokenAccount(
-        provider.connection,
-        admin.payer,
-        tokenAMint,
-        admin.publicKey
-      );
-    }
-    
-    try {
-      await getAccount(provider.connection, userTokenBAccount);
-    } catch {
-      await createAssociatedTokenAccount(
-        provider.connection,
-        admin.payer,
-        tokenBMint,
-        admin.publicKey
-      );
-    }
-    
+
     // Mint test tokens to user
     await mintTo(
       provider.connection,
@@ -178,7 +180,7 @@ describe('amm', () => {
       admin.publicKey,
       1000 * 10 ** 6 // 1000 tokens
     );
-    
+
     await mintTo(
       provider.connection,
       admin.payer,
@@ -187,25 +189,14 @@ describe('amm', () => {
       admin.publicKey,
       1000 * 10 ** 6 // 1000 tokens
     );
-    
+
     // Create user LP account
-    const userLpAccount = await getAssociatedTokenAddress(
+    const userLpAccount = await getOrCreateATA(
+      admin.payer,
       lpMint.publicKey,
       admin.publicKey
     );
-    
-    // Check if user LP account exists, create if not
-    try {
-      await getAccount(provider.connection, userLpAccount);
-    } catch {
-      await createAssociatedTokenAccount(
-        provider.connection,
-        admin.payer,
-        lpMint.publicKey,
-        admin.publicKey
-      );
-    }
-    
+
     // Add liquidity with all required accounts
     const tx = await program.methods
       .addLiquidity(
@@ -231,9 +222,9 @@ describe('amm', () => {
       // .signers([lpMint, tokenAVault, tokenBVault])
       .signers([admin.payer])
       .rpc();
-    
+
     console.log("Add liquidity transaction:", tx);
-    
+
     // Check balances
     const vaultABalance = await getAccount(provider.connection, tokenAVault.publicKey);
     const vaultBBalance = await getAccount(provider.connection, tokenBVault.publicKey);
@@ -241,7 +232,7 @@ describe('amm', () => {
     console.log("Vault A Balance:", vaultABalance.amount.toString());
     console.log("Vault B Balance:", vaultBBalance.amount.toString());
     console.log("User LP Balance:", userLpBalance.amount.toString());
-    
+
     assert.equal(vaultABalance.amount.toString(), (100 * 10 ** 6).toString());
     assert.equal(vaultBBalance.amount.toString(), (100 * 10 ** 6).toString());
     assert(new anchor.BN(0).lt(new anchor.BN(userLpBalance.amount)));
@@ -252,26 +243,26 @@ describe('amm', () => {
       tokenAMint,
       admin.publicKey
     );
-    
+
     const userTokenBAccount = await getAssociatedTokenAddress(
       tokenBMint,
       admin.publicKey
     );
-    
+
     // Get balances before swap
     const beforeUserA = await getAccount(provider.connection, userTokenAAccount);
     const beforeUserB = await getAccount(provider.connection, userTokenBAccount);
     const beforeVaultA = await getAccount(provider.connection, tokenAVault.publicKey);
     const beforeVaultB = await getAccount(provider.connection, tokenBVault.publicKey);
-    
+
     console.log("Before swap - User A:", beforeUserA.amount.toString());
     console.log("Before swap - User B:", beforeUserB.amount.toString());
     console.log("Before swap - Vault A:", beforeVaultA.amount.toString());
     console.log("Before swap - Vault B:", beforeVaultB.amount.toString());
-    
+
     // Swap A for B
     const swapAmount = new anchor.BN(10 * 10 ** 6); // 10 token A
-    
+
     const tx = await program.methods
       .swap(
         swapAmount,
@@ -290,20 +281,20 @@ describe('amm', () => {
       })
       .signers([admin.payer])
       .rpc();
-    
+
     console.log("Swap transaction:", tx);
-    
+
     // Get balances after swap
     const afterUserA = await getAccount(provider.connection, userTokenAAccount);
     const afterUserB = await getAccount(provider.connection, userTokenBAccount);
     const afterVaultA = await getAccount(provider.connection, tokenAVault.publicKey);
     const afterVaultB = await getAccount(provider.connection, tokenBVault.publicKey);
-    
+
     console.log("After swap - User A:", afterUserA.amount.toString());
     console.log("After swap - User B:", afterUserB.amount.toString());
     console.log("After swap - Vault A:", afterVaultA.amount.toString());
     console.log("After swap - Vault B:", afterVaultB.amount.toString());
-    
+
     // Verify swap
     const amountBeforeA = new anchor.BN(beforeUserA.amount);
     const amountAfterA = new anchor.BN(afterUserA.amount);
@@ -312,10 +303,10 @@ describe('amm', () => {
 
     const aSpent = amountBeforeA.sub(amountAfterA);
     const bReceived = amountAfterB.sub(amountBeforeB);
-    
+
     console.log("A spent:", aSpent.toString());
     console.log("B received:", bReceived.toString());
-    
+
     assert(aSpent.eq(swapAmount));
     assert(bReceived.gt(new anchor.BN(0)));
   });
@@ -325,31 +316,31 @@ describe('amm', () => {
   //     lpMint,
   //     admin.publicKey
   //   );
-    
+
   //   const userTokenAAccount = await getAssociatedTokenAddress(
   //     tokenAMint,
   //     admin.publicKey
   //   );
-    
+
   //   const userTokenBAccount = await getAssociatedTokenAddress(
   //     tokenBMint,
   //     admin.publicKey
   //   );
-    
+
   //   // Get balances before removal
   //   const beforeLp = await getAccount(provider.connection, userLpAccount);
   //   const beforeUserA = await getAccount(provider.connection, userTokenAAccount);
   //   const beforeUserB = await getAccount(provider.connection, userTokenBAccount);
   //   const beforeVaultA = await getAccount(provider.connection, tokenAVault);
   //   const beforeVaultB = await getAccount(provider.connection, tokenBVault);
-    
+
   //   console.log("Before removal - LP:", beforeLp.amount.toString());
   //   console.log("Before removal - Vault A:", beforeVaultA.amount.toString());
   //   console.log("Before removal - Vault B:", beforeVaultB.amount.toString());
-    
+
   //   // Remove 50% of LP tokens
   //   const lpToRemove = beforeLp.amount.div(new anchor.BN(2));
-    
+
   //   const tx = await program.methods
   //     .removeLiquidity(lpToRemove)
   //     .accounts({
@@ -365,29 +356,29 @@ describe('amm', () => {
   //     })
   //     .signers([admin.payer])
   //     .rpc();
-    
+
   //   console.log("Remove liquidity transaction:", tx);
-    
+
   //   // Get balances after removal
   //   const afterLp = await getAccount(provider.connection, userLpAccount);
   //   const afterUserA = await getAccount(provider.connection, userTokenAAccount);
   //   const afterUserB = await getAccount(provider.connection, userTokenBAccount);
   //   const afterVaultA = await getAccount(provider.connection, tokenAVault);
   //   const afterVaultB = await getAccount(provider.connection, tokenBVault);
-    
+
   //   console.log("After removal - LP:", afterLp.amount.toString());
   //   console.log("After removal - Vault A:", afterVaultA.amount.toString());
   //   console.log("After removal - Vault B:", afterVaultB.amount.toString());
-    
+
   //   // Verify removal
   //   const lpBurned = beforeLp.amount.sub(afterLp.amount);
   //   const aReceived = afterUserA.amount.sub(beforeUserA.amount);
   //   const bReceived = afterUserB.amount.sub(beforeUserB.amount);
-    
+
   //   console.log("LP burned:", lpBurned.toString());
   //   console.log("A received:", aReceived.toString());
   //   console.log("B received:", bReceived.toString());
-    
+
   //   assert(lpBurned.eq(lpToRemove));
   //   assert(aReceived.gt(new anchor.BN(0)));
   //   assert(bReceived.gt(new anchor.BN(0)));
