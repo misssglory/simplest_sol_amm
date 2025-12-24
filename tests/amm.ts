@@ -138,7 +138,7 @@ describe('amm', () => {
     // Create user token accounts
 
     // Check if user token accounts exist, create if not
-    const getOrCreateATA = async (
+    const getOrCreateATASimple = async (
       payer: anchor.web3.Signer, 
       mint: anchor.web3.PublicKey, 
       owner: anchor.web3.PublicKey
@@ -159,13 +159,13 @@ describe('amm', () => {
       return ata;
     }
 
-    const userTokenAAccount = await getOrCreateATA(
+    const userTokenAAccount = await getOrCreateATASimple(
       admin.payer,
       tokenAMint,
       admin.publicKey
     );
 
-    const userTokenBAccount = await getOrCreateATA(
+    const userTokenBAccount = await getOrCreateATASimple(
       admin.payer,
       tokenBMint,
       admin.publicKey
@@ -191,7 +191,7 @@ describe('amm', () => {
     );
 
     // Create user LP account
-    const userLpAccount = await getOrCreateATA(
+    const userLpAccount = await getOrCreateATASimple(
       admin.payer,
       lpMint.publicKey,
       admin.publicKey
@@ -311,76 +311,79 @@ describe('amm', () => {
     assert(bReceived.gt(new anchor.BN(0)));
   });
 
-  // it('Remove Liquidity', async () => {
-  //   const userLpAccount = await getAssociatedTokenAddress(
-  //     lpMint,
-  //     admin.publicKey
-  //   );
+  it('Remove Liquidity', async () => {
+    const userLpAccount = await getAssociatedTokenAddress(
+      lpMint.publicKey,
+      admin.publicKey
+    );
 
-  //   const userTokenAAccount = await getAssociatedTokenAddress(
-  //     tokenAMint,
-  //     admin.publicKey
-  //   );
+    const userTokenAAccount = await getAssociatedTokenAddress(
+      tokenAMint,
+      admin.publicKey
+    );
 
-  //   const userTokenBAccount = await getAssociatedTokenAddress(
-  //     tokenBMint,
-  //     admin.publicKey
-  //   );
+    const userTokenBAccount = await getAssociatedTokenAddress(
+      tokenBMint,
+      admin.publicKey
+    );
 
-  //   // Get balances before removal
-  //   const beforeLp = await getAccount(provider.connection, userLpAccount);
-  //   const beforeUserA = await getAccount(provider.connection, userTokenAAccount);
-  //   const beforeUserB = await getAccount(provider.connection, userTokenBAccount);
-  //   const beforeVaultA = await getAccount(provider.connection, tokenAVault);
-  //   const beforeVaultB = await getAccount(provider.connection, tokenBVault);
+    // Get balances before removal
+    const beforeLp = await getAccount(provider.connection, userLpAccount);
+    const beforeUserA = await getAccount(provider.connection, userTokenAAccount);
+    const beforeUserB = await getAccount(provider.connection, userTokenBAccount);
+    const beforeVaultA = await getAccount(provider.connection, tokenAVault.publicKey);
+    const beforeVaultB = await getAccount(provider.connection, tokenBVault.publicKey);
 
-  //   console.log("Before removal - LP:", beforeLp.amount.toString());
-  //   console.log("Before removal - Vault A:", beforeVaultA.amount.toString());
-  //   console.log("Before removal - Vault B:", beforeVaultB.amount.toString());
+    console.log("Before removal - LP:", beforeLp.amount.toString());
+    console.log("Before removal - Vault A:", beforeVaultA.amount.toString());
+    console.log("Before removal - Vault B:", beforeVaultB.amount.toString());
 
-  //   // Remove 50% of LP tokens
-  //   const lpToRemove = beforeLp.amount.div(new anchor.BN(2));
+    // Remove 50% of LP tokens
+    const lpToRemove = new anchor.BN(beforeLp.amount).div(new anchor.BN(2));
 
-  //   const tx = await program.methods
-  //     .removeLiquidity(lpToRemove)
-  //     .accounts({
-  //       pool: pool,
-  //       tokenAVault: tokenAVault,
-  //       tokenBVault: tokenBVault,
-  //       lpMint: lpMint,
-  //       user: admin.publicKey,
-  //       userLpAccount: userLpAccount,
-  //       userTokenAAccount: userTokenAAccount,
-  //       userTokenBAccount: userTokenBAccount,
-  //       tokenProgram: TOKEN_PROGRAM_ID,
-  //     })
-  //     .signers([admin.payer])
-  //     .rpc();
+    const tx = await program.methods
+      .removeLiquidity(lpToRemove)
+      .accounts({
+        pool: pool,
+        tokenAVault: tokenAVault,
+        tokenBVault: tokenBVault,
+        lpMint: lpMint,
+        user: admin.publicKey,
+        userLpAccount: userLpAccount,
+        userTokenAAccount: userTokenAAccount,
+        userTokenBAccount: userTokenBAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([admin.payer])
+      .rpc();
 
-  //   console.log("Remove liquidity transaction:", tx);
+    console.log("Remove liquidity transaction:", tx);
 
-  //   // Get balances after removal
-  //   const afterLp = await getAccount(provider.connection, userLpAccount);
-  //   const afterUserA = await getAccount(provider.connection, userTokenAAccount);
-  //   const afterUserB = await getAccount(provider.connection, userTokenBAccount);
-  //   const afterVaultA = await getAccount(provider.connection, tokenAVault);
-  //   const afterVaultB = await getAccount(provider.connection, tokenBVault);
+    // Get balances after removal
+    const afterLp = await getAccount(provider.connection, userLpAccount);
+    const afterUserA = await getAccount(provider.connection, userTokenAAccount);
+    const afterUserB = await getAccount(provider.connection, userTokenBAccount);
+    const afterVaultA = await getAccount(provider.connection, tokenAVault.publicKey);
+    const afterVaultB = await getAccount(provider.connection, tokenBVault.publicKey);
 
-  //   console.log("After removal - LP:", afterLp.amount.toString());
-  //   console.log("After removal - Vault A:", afterVaultA.amount.toString());
-  //   console.log("After removal - Vault B:", afterVaultB.amount.toString());
+    console.log("After removal - LP:", afterLp.amount.toString());
+    console.log("After removal - Vault A:", afterVaultA.amount.toString());
+    console.log("After removal - Vault B:", afterVaultB.amount.toString());
 
-  //   // Verify removal
-  //   const lpBurned = beforeLp.amount.sub(afterLp.amount);
-  //   const aReceived = afterUserA.amount.sub(beforeUserA.amount);
-  //   const bReceived = afterUserB.amount.sub(beforeUserB.amount);
+    // Verify removal
+    const lpBurned = new anchor.BN(beforeLp.amount).sub(
+      new anchor.BN(afterLp.amount));
+    const aReceived = new anchor.BN(afterUserA.amount).sub(
+      new anchor.BN(beforeUserA.amount));
+    const bReceived = new anchor.BN(afterUserB.amount).sub(
+      new anchor.BN(beforeUserB.amount));
 
-  //   console.log("LP burned:", lpBurned.toString());
-  //   console.log("A received:", aReceived.toString());
-  //   console.log("B received:", bReceived.toString());
+    console.log("LP burned:", lpBurned.toString());
+    console.log("A received:", aReceived.toString());
+    console.log("B received:", bReceived.toString());
 
-  //   assert(lpBurned.eq(lpToRemove));
-  //   assert(aReceived.gt(new anchor.BN(0)));
-  //   assert(bReceived.gt(new anchor.BN(0)));
-  // });
+    assert(lpBurned.eq(lpToRemove));
+    assert(aReceived.gt(new anchor.BN(0)));
+    assert(bReceived.gt(new anchor.BN(0)));
+  });
 });
