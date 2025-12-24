@@ -118,7 +118,7 @@ describe('amm', () => {
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       })
       // .signers([admin.payer])
-      .signers([tokenAVault, tokenBVault, lpMint])
+      .signers([tokenAVault, tokenBVault, lpMint, admin.payer])
       .rpc();
     
     console.log("Initialize pool transaction:", tx);
@@ -229,7 +229,7 @@ describe('amm', () => {
       })
       // .signers([admin.payer])
       // .signers([lpMint, tokenAVault, tokenBVault])
-      .signers([])
+      .signers([admin.payer])
       .rpc();
     
     console.log("Add liquidity transaction:", tx);
@@ -247,73 +247,78 @@ describe('amm', () => {
     assert(new anchor.BN(0).lt(new anchor.BN(userLpBalance.amount)));
   });
 
-  // it('Swap Tokens', async () => {
-  //   const userTokenAAccount = await getAssociatedTokenAddress(
-  //     tokenAMint,
-  //     admin.publicKey
-  //   );
+  it('Swap Tokens', async () => {
+    const userTokenAAccount = await getAssociatedTokenAddress(
+      tokenAMint,
+      admin.publicKey
+    );
     
-  //   const userTokenBAccount = await getAssociatedTokenAddress(
-  //     tokenBMint,
-  //     admin.publicKey
-  //   );
+    const userTokenBAccount = await getAssociatedTokenAddress(
+      tokenBMint,
+      admin.publicKey
+    );
     
-  //   // Get balances before swap
-  //   const beforeUserA = await getAccount(provider.connection, userTokenAAccount);
-  //   const beforeUserB = await getAccount(provider.connection, userTokenBAccount);
-  //   const beforeVaultA = await getAccount(provider.connection, tokenAVault);
-  //   const beforeVaultB = await getAccount(provider.connection, tokenBVault);
+    // Get balances before swap
+    const beforeUserA = await getAccount(provider.connection, userTokenAAccount);
+    const beforeUserB = await getAccount(provider.connection, userTokenBAccount);
+    const beforeVaultA = await getAccount(provider.connection, tokenAVault.publicKey);
+    const beforeVaultB = await getAccount(provider.connection, tokenBVault.publicKey);
     
-  //   console.log("Before swap - User A:", beforeUserA.amount.toString());
-  //   console.log("Before swap - User B:", beforeUserB.amount.toString());
-  //   console.log("Before swap - Vault A:", beforeVaultA.amount.toString());
-  //   console.log("Before swap - Vault B:", beforeVaultB.amount.toString());
+    console.log("Before swap - User A:", beforeUserA.amount.toString());
+    console.log("Before swap - User B:", beforeUserB.amount.toString());
+    console.log("Before swap - Vault A:", beforeVaultA.amount.toString());
+    console.log("Before swap - Vault B:", beforeVaultB.amount.toString());
     
-  //   // Swap A for B
-  //   const swapAmount = new anchor.BN(10 * 10 ** 6); // 10 token A
+    // Swap A for B
+    const swapAmount = new anchor.BN(10 * 10 ** 6); // 10 token A
     
-  //   const tx = await program.methods
-  //     .swap(
-  //       swapAmount,
-  //       new anchor.BN(0) // Minimum output
-  //     )
-  //     .accounts({
-  //       pool: pool,
-  //       tokenAVault: tokenAVault,
-  //       tokenBVault: tokenBVault,
-  //       user: admin.publicKey,
-  //       inputMint: tokenAMint,
-  //       outputMint: tokenBMint,
-  //       userInputAccount: userTokenAAccount,
-  //       userOutputAccount: userTokenBAccount,
-  //       tokenProgram: TOKEN_PROGRAM_ID,
-  //     })
-  //     .signers([admin.payer])
-  //     .rpc();
+    const tx = await program.methods
+      .swap(
+        swapAmount,
+        new anchor.BN(0) // Minimum output
+      )
+      .accounts({
+        pool: pool,
+        tokenAVault: tokenAVault,
+        tokenBVault: tokenBVault,
+        user: admin.publicKey,
+        inputMint: tokenAMint,
+        outputMint: tokenBMint,
+        userInputAccount: userTokenAAccount,
+        userOutputAccount: userTokenBAccount,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([admin.payer])
+      .rpc();
     
-  //   console.log("Swap transaction:", tx);
+    console.log("Swap transaction:", tx);
     
-  //   // Get balances after swap
-  //   const afterUserA = await getAccount(provider.connection, userTokenAAccount);
-  //   const afterUserB = await getAccount(provider.connection, userTokenBAccount);
-  //   const afterVaultA = await getAccount(provider.connection, tokenAVault);
-  //   const afterVaultB = await getAccount(provider.connection, tokenBVault);
+    // Get balances after swap
+    const afterUserA = await getAccount(provider.connection, userTokenAAccount);
+    const afterUserB = await getAccount(provider.connection, userTokenBAccount);
+    const afterVaultA = await getAccount(provider.connection, tokenAVault.publicKey);
+    const afterVaultB = await getAccount(provider.connection, tokenBVault.publicKey);
     
-  //   console.log("After swap - User A:", afterUserA.amount.toString());
-  //   console.log("After swap - User B:", afterUserB.amount.toString());
-  //   console.log("After swap - Vault A:", afterVaultA.amount.toString());
-  //   console.log("After swap - Vault B:", afterVaultB.amount.toString());
+    console.log("After swap - User A:", afterUserA.amount.toString());
+    console.log("After swap - User B:", afterUserB.amount.toString());
+    console.log("After swap - Vault A:", afterVaultA.amount.toString());
+    console.log("After swap - Vault B:", afterVaultB.amount.toString());
     
-  //   // Verify swap
-  //   const aSpent = beforeUserA.amount.sub(afterUserA.amount);
-  //   const bReceived = afterUserB.amount.sub(beforeUserB.amount);
+    // Verify swap
+    const amountBeforeA = new anchor.BN(beforeUserA.amount);
+    const amountAfterA = new anchor.BN(afterUserA.amount);
+    const amountBeforeB = new anchor.BN(beforeUserB.amount);
+    const amountAfterB = new anchor.BN(afterUserB.amount);
+
+    const aSpent = amountBeforeA.sub(amountAfterA);
+    const bReceived = amountAfterB.sub(amountBeforeB);
     
-  //   console.log("A spent:", aSpent.toString());
-  //   console.log("B received:", bReceived.toString());
+    console.log("A spent:", aSpent.toString());
+    console.log("B received:", bReceived.toString());
     
-  //   assert(aSpent.eq(swapAmount));
-  //   assert(bReceived.gt(new anchor.BN(0)));
-  // });
+    assert(aSpent.eq(swapAmount));
+    assert(bReceived.gt(new anchor.BN(0)));
+  });
 
   // it('Remove Liquidity', async () => {
   //   const userLpAccount = await getAssociatedTokenAddress(
