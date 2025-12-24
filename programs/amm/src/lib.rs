@@ -4,7 +4,7 @@ use anchor_spl::{
     associated_token::AssociatedToken,
 };
 
-declare_id!("6wypgzPHKssHj8tVrofH8FzDq9fib2QLWsAkMnDFsSCv");
+declare_id!("HGyfHondhiRc4GUpvzWRyNRbMuWv6vJUAoEtcLP9kVoY");
 
 #[program]
 pub mod amm {
@@ -264,7 +264,8 @@ pub struct InitializePool<'info> {
     #[account(
         init,
         payer = admin,
-        space = 8 + std::mem::size_of::<Pool>(),
+        // space = 8 + std::mem::size_of::<Pool>(),
+        space = 8 + Pool::INIT_SPACE,
         seeds = [b"pool", token_a_mint.key().as_ref(), token_b_mint.key().as_ref()],
         bump
     )]
@@ -274,7 +275,7 @@ pub struct InitializePool<'info> {
     pub token_b_mint: Account<'info, Mint>,
     
     #[account(
-        init,
+        init_if_needed,
         payer = admin,
         token::mint = token_a_mint,
         token::authority = pool,
@@ -282,7 +283,7 @@ pub struct InitializePool<'info> {
     pub token_a_vault: Account<'info, TokenAccount>,
     
     #[account(
-        init,
+        init_if_needed,
         payer = admin,
         token::mint = token_b_mint,
         token::authority = pool,
@@ -290,10 +291,11 @@ pub struct InitializePool<'info> {
     pub token_b_vault: Account<'info, TokenAccount>,
     
     #[account(
-        init,
+        init_if_needed,
         payer = admin,
         mint::decimals = 9,
         mint::authority = pool,
+        mint::freeze_authority = pool,
     )]
     pub lp_mint: Account<'info, Mint>,
     
@@ -445,7 +447,7 @@ pub struct RemoveLiquidity<'info> {
 }
 
 #[account]
-#[derive(Default)]
+#[derive(Default, InitSpace)]
 pub struct Pool {
     pub token_a_mint: Pubkey,
     pub token_b_mint: Pubkey,
