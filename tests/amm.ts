@@ -34,6 +34,7 @@ describe('amm', () => {
   let lpMint: anchor.web3.Keypair;
   let tokenAVault: anchor.web3.Keypair;
   let tokenBVault: anchor.web3.Keypair;
+  const decimals: bigint = 9n;
 
   before(async () => {
     // Create test tokens
@@ -42,7 +43,7 @@ describe('amm', () => {
       admin.payer,
       admin.publicKey,
       null,
-      9
+      Number(decimals)
     );
 
     tokenBMint = await createMint(
@@ -50,7 +51,7 @@ describe('amm', () => {
       admin.payer,
       admin.publicKey,
       null,
-      6
+      Number(decimals)
     );
 
     // Find pool PDA
@@ -62,6 +63,9 @@ describe('amm', () => {
       ],
       program.programId
     );
+
+    tokenAVault = anchor.web3.Keypair.generate();
+    tokenBVault = anchor.web3.Keypair.generate();
   });
 
   it('Initialize AMM Pool', async () => {
@@ -76,10 +80,8 @@ describe('amm', () => {
     console.log("LP Mint:", lpMint.publicKey.toBase58());
 
     // Create vault accounts manually
-    tokenAVault = anchor.web3.Keypair.generate();
     console.log("Token A Vault:", tokenAVault.publicKey.toBase58());
 
-    tokenBVault = anchor.web3.Keypair.generate();
     console.log("Token B Vault: ", tokenBVault.publicKey.toBase58());
     console.log("Token A Mint: ", tokenAMint.toBase58());
     console.log("Token B Mint: ", tokenBMint.toBase58());
@@ -178,7 +180,7 @@ describe('amm', () => {
       tokenAMint,
       userTokenAAccount,
       admin.publicKey,
-      1000 * 10 ** 6 // 1000 tokens
+      1000n * 10n ** decimals // 1000 tokens
     );
 
     await mintTo(
@@ -187,7 +189,7 @@ describe('amm', () => {
       tokenBMint,
       userTokenBAccount,
       admin.publicKey,
-      1000 * 10 ** 6 // 1000 tokens
+      1000n * 10n ** decimals // 1000 tokens
     );
 
     // Create user LP account
@@ -200,8 +202,8 @@ describe('amm', () => {
     // Add liquidity with all required accounts
     const tx = await program.methods
       .addLiquidity(
-        new anchor.BN(100 * 10 ** 6), // 100 token A
-        new anchor.BN(100 * 10 ** 6)  // 100 token B
+        new anchor.BN(100n * 10n ** decimals), // 100 token A
+        new anchor.BN(100n * 10n ** decimals)  // 100 token B
       )
       .accounts({
         pool: pool,
@@ -226,15 +228,15 @@ describe('amm', () => {
     console.log("Add liquidity transaction:", tx);
 
     // Check balances
-    const vaultABalance = await getAccount(provider.connection, tokenAVault.publicKey);
-    const vaultBBalance = await getAccount(provider.connection, tokenBVault.publicKey);
-    const userLpBalance = await getAccount(provider.connection, userLpAccount);
+    const vaultABalance = await getAccount(provider.connection, tokenAVault.publicKey,);
+    const vaultBBalance = await getAccount(provider.connection, tokenBVault.publicKey,);
+    const userLpBalance = await getAccount(provider.connection, userLpAccount,);
     console.log("Vault A Balance:", vaultABalance.amount.toString());
     console.log("Vault B Balance:", vaultBBalance.amount.toString());
     console.log("User LP Balance:", userLpBalance.amount.toString());
 
-    assert.equal(vaultABalance.amount.toString(), (100 * 10 ** 6).toString());
-    assert.equal(vaultBBalance.amount.toString(), (100 * 10 ** 6).toString());
+    assert.equal(vaultABalance.amount.toString(), (100n * 10n ** decimals).toString());
+    assert.equal(vaultBBalance.amount.toString(), (100n * 10n ** decimals).toString());
     assert(new anchor.BN(0).lt(new anchor.BN(userLpBalance.amount)));
   });
 
@@ -261,7 +263,7 @@ describe('amm', () => {
     console.log("Before swap - Vault B:", beforeVaultB.amount.toString());
 
     // Swap A for B
-    const swapAmount = new anchor.BN(10 * 10 ** 6); // 10 token A
+    const swapAmount = new anchor.BN(10n * 10n ** decimals); // 10 token A
 
     const tx = await program.methods
       .swap(

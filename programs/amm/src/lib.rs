@@ -59,21 +59,31 @@ pub mod amm {
         
         // Calculate LP tokens to mint
         let lp_to_mint = if ctx.accounts.lp_mint.supply == 0 {
-            // First liquidity provider gets LP tokens equal to sqrt(amount_a * amount_b)
-            let product = amount_a.checked_mul(amount_b).unwrap();
-            (product as f64).sqrt() as u64
-        } else {
-            // Calculate based on share of pool
-            let total_lp = ctx.accounts.lp_mint.supply;
-            let pool_a_before = ctx.accounts.token_a_vault.amount - amount_a;
+            // Safe sqrt(amount_a * amount_b) using u128 to prevent overflow.
+            // For 9-decimal tokens, 100 * 100 = 10^22, which requires u128.
+            let product = (amount_a as u128)
+                .checked_mul(amount_b as u128)
+                .ok_or(error!(AmmError::MathOverflow))?;
             
-            amount_a
-                .checked_mul(total_lp)
-                .unwrap()
-                .checked_div(pool_a_before)
-                .unwrap()
+            // Use the native integer square root stabilized in 2025
+            product.isqrt() as u64
+        } else {
+            // Calculate based on share of pool: (amount_a * total_lp) / pool_a_before
+            let total_lp = ctx.accounts.lp_mint.supply;
+            
+            // Ensure we use the balance BEFORE the current transfer was finalized
+            let pool_a_before = ctx.accounts.token_a_vault.amount
+                .checked_sub(amount_a)
+                .ok_or(error!(AmmError::MathUnderflow))?;
+
+            // Always Multiply BEFORE you Divide to maintain precision.
+            // Perform the entire operation in u128 to prevent intermediate overflow.
+            (amount_a as u128)
+                .checked_mul(total_lp as u128)
+                .ok_or(error!(AmmError::MathOverflow))?
+                .checked_div(pool_a_before as u128)
+                .ok_or(error!(AmmError::DivideByZero))? as u64
         };
-        
         // Mint LP tokens
         let seeds = &[
             b"pool",
@@ -95,7 +105,7 @@ pub mod amm {
             signer,
         );
         mint_to(cpi_ctx, lp_to_mint)?;
-        
+
         Ok(())
     }
 
@@ -105,38 +115,38 @@ pub mod amm {
         min_amount_out: u64,
     ) -> Result<()> {
         let pool = &ctx.accounts.pool;
-        
-        // Determine direction
+    
         let is_a_to_b = ctx.accounts.input_mint.key() == pool.token_a_mint;
-        
         let (input_reserves, output_reserves) = if is_a_to_b {
             (ctx.accounts.token_a_vault.amount, ctx.accounts.token_b_vault.amount)
         } else {
             (ctx.accounts.token_b_vault.amount, ctx.accounts.token_a_vault.amount)
         };
-        
-        // Calculate output with fee
-        let fee_amount = amount_in
-            .checked_mul(pool.fee_bps as u64)
-            .unwrap()
+
+        // 1. Calculate fee safely
+        let fee_amount = (amount_in as u128)
+            .checked_mul(pool.fee_bps as u128)
+            .ok_or(error!(AmmError::MathOverflow))?
             .checked_div(10000)
-            .unwrap();
+            .ok_or(error!(AmmError::DivideByZero))? as u64;
         
         let amount_in_after_fee = amount_in.checked_sub(fee_amount).unwrap();
+
+        // 2. Calculate output using u128 to prevent 10^21 overflow
+        // Formula: (amount_in * reserves_out) / (reserves_in + amount_in)
+        let numerator = (amount_in_after_fee as u128)
+            .checked_mul(output_reserves as u128)
+            .ok_or(error!(AmmError::MathOverflow))?;
+            
+        let denominator = (input_reserves as u128)
+            .checked_add(amount_in_after_fee as u128)
+            .ok_or(error!(AmmError::MathOverflow))?;
         
-        let numerator = amount_in_after_fee
-            .checked_mul(output_reserves)
-            .unwrap();
-        let denominator = input_reserves
-            .checked_add(amount_in_after_fee)
-            .unwrap();
+        let amount_out = numerator
+            .checked_div(denominator)
+            .ok_or(error!(AmmError::DivideByZero))? as u64;
         
-        let amount_out = numerator.checked_div(denominator).unwrap();
-        
-        require!(
-            amount_out >= min_amount_out,
-            AmmError::SlippageExceeded
-        );
+        require!(amount_out >= min_amount_out, AmmError::SlippageExceeded);
         
         // Transfer input
         let transfer_in_accounts = Transfer {
@@ -471,5 +481,9 @@ pub enum AmmError {
     #[msg("Invalid token pair")]
     InvalidTokenPair,
     #[msg("Math overflow")]
+    MathUnderflow,
+    #[msg("Math underflow")]
     MathOverflow,
+    #[msg("Divide by zero")]
+    DivideByZero,
 }
